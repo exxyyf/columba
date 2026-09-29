@@ -1,0 +1,20 @@
+# Шаблон /etc/caddy/Caddyfile на сервере. Реальный файл живёт только на
+# сервере: в нём hash пароля basic auth, в git его не кладём.
+# Хост *.sslip.io резолвится в IP из своего имени — даёт валидный
+# Let's Encrypt сертификат без покупки домена.
+#
+# Hash пароля: caddy hash-password --plaintext '<пароль>'
+
+{$VIEWER_HOST} {
+    basic_auth {
+        columba {$PASSWORD_HASH}
+    }
+    reverse_proxy 127.0.0.1:8425
+}
+
+{$API_HOST} {
+    basic_auth {
+        columba {$PASSWORD_HASH}
+    }
+    reverse_proxy 127.0.0.1:8000
+}

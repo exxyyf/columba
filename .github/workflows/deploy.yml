@@ -1,0 +1,29 @@
+# CI/CD: по пушу в main зайти на сервер по SSH и выполнить deploy/deploy.sh.
+# Секреты (Settings → Secrets and variables → Actions):
+#   DEPLOY_HOST    — IP или хост сервера
+#   DEPLOY_SSH_KEY — приватный ключ деплоя (парный публичный — в authorized_keys сервера)
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+            root@"$HOST" 'bash /opt/columba/deploy/deploy.sh'

@@ -1,0 +1,14 @@
+# API-сервис инференса на сервере. Запуск: docker compose -f deploy/docker-compose.yml up -d --build
+services:
+  api:
+    build:
+      context: ..
+      args:
+        TORCH_VARIANT: cpu
+    image: columba:cpu
+    restart: unless-stopped
+    ports:
+      # только loopback: наружу проксирует Caddy с basic auth
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ../artifacts:/app/artifacts:ro
