@@ -6,12 +6,13 @@
  * Только локальный запуск, наружу ничего не ходит.
  */
 
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 
 import { readDicomPixels } from "./dicomPixels.js";
-import { ensureScan, getState, scanRoots } from "./manifest.js";
+import { UPLOAD_ROOT, ensureScan, getState, scanRoots } from "./manifest.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(HERE, "..", "public");
@@ -33,6 +34,38 @@ app.get("/api/manifest", async (req, res) => {
   try {
     const manifest = await ensureScan(req.query.force === "1");
     res.json(manifest);
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
+/**
+ * Загрузка собственного DICOM: тело запроса — файл целиком, имя в X-File-Name
+ * (URL-кодированное), метка партии в X-Upload-Batch. Файлы одной партии
+ * складываются в общую папку-«исследование» внутри data/Загруженные;
+ * классификацию запускает клиент пересканированием после последнего файла.
+ */
+app.post("/api/upload", express.raw({ type: () => true, limit: "128mb" }), (req, res) => {
+  try {
+    const rawName = decodeURIComponent(String(req.header("X-File-Name") ?? ""));
+    const name = path.basename(rawName).replace(/[\\/:*?"<>|]/g, "_").trim();
+    if (!name) {
+      res.status(400).json({ error: "не передано имя файла (X-File-Name)" });
+      return;
+    }
+    const batch =
+      String(req.header("X-Upload-Batch") ?? "")
+        .replace(/[^0-9A-Za-z_-]/g, "")
+        .slice(0, 40) || "без_метки";
+    const body = req.body as Buffer;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      res.status(400).json({ error: "пустое тело запроса" });
+      return;
+    }
+    const dir = path.join(UPLOAD_ROOT, `Загрузка_${batch}`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, name), body);
+    res.json({ saved: path.relative(UPLOAD_ROOT, path.join(dir, name)) });
   } catch (error) {
     res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
   }

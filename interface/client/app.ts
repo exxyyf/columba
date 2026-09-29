@@ -378,6 +378,58 @@ searchInput.addEventListener("input", () => {
 });
 
 document.getElementById("rescan")?.addEventListener("click", () => void loadManifest(true));
+
+// ---------------------------------------------------------------------------
+// Загрузка собственных файлов: партия уходит в одну папку-«исследование»,
+// после последнего файла — пересканирование (та же классификация пайплайна).
+// ---------------------------------------------------------------------------
+
+const uploadButton = document.getElementById("upload") as HTMLButtonElement | null;
+const uploadInput = document.getElementById("upload-input") as HTMLInputElement | null;
+
+uploadButton?.addEventListener("click", () => uploadInput?.click());
+
+uploadInput?.addEventListener("change", () => {
+  const files = Array.from(uploadInput.files ?? []);
+  uploadInput.value = "";
+  if (files.length === 0 || !uploadButton) return;
+  void uploadFiles(files, uploadButton);
+});
+
+async function uploadFiles(files: File[], button: HTMLButtonElement): Promise<void> {
+  const label = button.innerHTML;
+  button.disabled = true;
+  const batch = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const failures: string[] = [];
+  for (let i = 0; i < files.length; i += 1) {
+    button.innerHTML = `Загрузка ${i + 1} из ${files.length}…`;
+    try {
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: files[i],
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "X-File-Name": encodeURIComponent(files[i].name),
+          "X-Upload-Batch": batch,
+        },
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({ error: response.statusText }));
+        failures.push(`${files[i].name}: ${String(body.error ?? response.statusText)}`);
+      }
+    } catch (error) {
+      failures.push(`${files[i].name}: ${String(error instanceof Error ? error.message : error)}`);
+    }
+  }
+  button.innerHTML = label;
+  button.disabled = false;
+  if (failures.length > 0) {
+    alert(`Не удалось загрузить:\n${failures.join("\n")}`);
+  }
+  if (failures.length < files.length) {
+    await loadManifest(true);
+  }
+}
 document.getElementById("modal-close")?.addEventListener("click", closeModal);
 modal.addEventListener("click", (event) => {
   if (event.target === modal) closeModal();

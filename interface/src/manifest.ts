@@ -24,6 +24,9 @@ const DEFAULT_ROOTS = [
   path.join(REPO_ROOT, "data", "Для теста"),
 ];
 
+/** Каталог загрузок из веб-интерфейса: каждая загрузка — своя папка-«исследование». */
+export const UPLOAD_ROOT = path.join(REPO_ROOT, "data", "Загруженные");
+
 export interface ManifestFile {
   file_id: string;
   file_name: string;
@@ -72,7 +75,8 @@ let inFlight: Promise<Manifest> | null = null;
 
 export function scanRoots(): string[] {
   const fromEnv = process.env.COLUMBA_SCAN_ROOTS;
-  const roots = fromEnv ? fromEnv.split(path.delimiter) : DEFAULT_ROOTS;
+  const roots = fromEnv ? fromEnv.split(path.delimiter) : DEFAULT_ROOTS.slice();
+  if (!roots.includes(UPLOAD_ROOT)) roots.push(UPLOAD_ROOT);
   return roots.filter((root) => existsSync(root));
 }
 
