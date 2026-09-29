@@ -48,11 +48,29 @@
         <div class="filters violation-filters hidden" id="violation-filters" role="group" aria-label="Фильтр по типам нарушений"></div>
       </div>
 
-      <button id="upload" class="rescan" type="button" title="Загрузить свои DICOM-файлы: они попадут в общую галерею и пройдут классификацию">
-        <span class="rescan-icon" aria-hidden="true">⇪</span>
-        Загрузить снимки
-      </button>
+      <div class="upload-menu-wrap">
+        <button id="upload" class="rescan" type="button" aria-haspopup="menu" aria-expanded="false" title="Загрузить свои DICOM-файлы: они попадут в общую галерею и пройдут классификацию">
+          <span class="rescan-icon" aria-hidden="true">⇪</span>
+          Загрузить снимки
+        </button>
+        <div id="upload-menu" class="upload-menu hidden" role="menu" aria-label="Источник загрузки">
+          <button type="button" role="menuitem" data-upload="files">
+            <strong>Отдельные файлы</strong>
+            <small>Один или несколько снимков без структуры папок</small>
+          </button>
+          <button type="button" role="menuitem" data-upload="folder">
+            <strong>Папку исследований</strong>
+            <small>Структура сохранится — сторона бедра определяется парно</small>
+          </button>
+          <button type="button" role="menuitem" data-upload="zip">
+            <strong>ZIP-архив</strong>
+            <small>Распакуется на сервере, структура папок сохранится</small>
+          </button>
+        </div>
+      </div>
       <input id="upload-input" type="file" multiple hidden />
+      <input id="upload-folder-input" type="file" webkitdirectory multiple hidden />
+      <input id="upload-zip-input" type="file" accept=".zip,application/zip" hidden />
 
       <button id="rescan" class="rescan" type="button" title="Перечитать каталоги и повторить классификацию">
         <span class="rescan-icon" aria-hidden="true">↻</span>

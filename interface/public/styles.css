@@ -328,6 +328,63 @@ h1 {
   line-height: 1;
 }
 
+.upload-menu-wrap {
+  position: relative;
+}
+
+.upload-menu-wrap .rescan {
+  width: 100%;
+}
+
+.upload-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  min-width: 300px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.upload-menu button {
+  display: grid;
+  gap: 2px;
+  padding: 12px 15px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.upload-menu button:last-child {
+  border-bottom: 0;
+}
+
+.upload-menu button:hover {
+  background: var(--blue-pale);
+}
+
+.upload-menu button:focus-visible {
+  outline: 3px solid var(--blue);
+  outline-offset: -3px;
+}
+
+.upload-menu strong {
+  font-size: 14px;
+  font-weight: 680;
+}
+
+.upload-menu small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .filter:focus-visible,
 .rescan:focus-visible,
 .card:focus-visible,
@@ -880,9 +937,15 @@ h1 {
     grid-template-columns: minmax(240px, 0.8fr) minmax(420px, 1.2fr);
   }
 
-  .rescan {
+  .rescan,
+  .upload-menu-wrap {
     grid-column: 1 / -1;
     justify-self: end;
+  }
+
+  .upload-menu-wrap .rescan {
+    grid-column: auto;
+    justify-self: auto;
   }
 }
 
@@ -906,7 +969,8 @@ h1 {
     grid-template-columns: 1fr;
   }
 
-  .rescan {
+  .rescan,
+  .upload-menu-wrap {
     grid-column: auto;
     justify-self: stretch;
   }

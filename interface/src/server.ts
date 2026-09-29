@@ -9,6 +9,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import AdmZip from "adm-zip";
 import express from "express";
 
 import { readDicomPixels } from "./dicomPixels.js";
@@ -55,32 +56,111 @@ app.get("/api/quality", async (_req, res) => {
 });
 
 /**
+ * Относительный путь загрузки -> безопасный путь внутри папки партии.
+ * Отсекает попытки выйти из каталога («..», абсолютные пути) и чистит
+ * каждый сегмент от символов, недопустимых в именах файлов.
+ */
+function safeRelPath(raw: string): string | null {
+  const parts = raw
+    .replaceAll("\\", "/")
+    .split("/")
+    .filter((part) => part.length > 0);
+  const clean: string[] = [];
+  for (const part of parts) {
+    if (part === "." || part === "..") return null;
+    const name = part.replace(/[\\/:*?"<>|]/g, "_").trim();
+    if (!name) return null;
+    clean.push(name);
+  }
+  return clean.length > 0 ? clean.join("/") : null;
+}
+
+/** Метка партии из заголовка: одна загрузка (пачка/папка/архив) — одна папка. */
+function batchLabel(req: express.Request): string {
+  return (
+    String(req.header("X-Upload-Batch") ?? "")
+      .replace(/[^0-9A-Za-z_-]/g, "")
+      .slice(0, 40) || "без_метки"
+  );
+}
+
+/**
  * Загрузка собственного DICOM: тело запроса — файл целиком, имя в X-File-Name
- * (URL-кодированное), метка партии в X-Upload-Batch. Файлы одной партии
- * складываются в общую папку-«исследование» внутри data/Загруженные;
- * классификацию запускает клиент пересканированием после последнего файла.
+ * (URL-кодированное), метка партии в X-Upload-Batch. Папочная загрузка
+ * дополнительно передаёт X-Relative-Path — путь относительно выбранной папки
+ * (без её имени, как в /predict/zip API): структура исследований сохраняется
+ * на диске, и парное определение стороны бедра продолжает работать.
+ * Классификацию запускает клиент пересканированием после последнего файла.
  */
 app.post("/api/upload", express.raw({ type: () => true, limit: "128mb" }), (req, res) => {
   try {
-    const rawName = decodeURIComponent(String(req.header("X-File-Name") ?? ""));
-    const name = path.basename(rawName).replace(/[\\/:*?"<>|]/g, "_").trim();
-    if (!name) {
-      res.status(400).json({ error: "не передано имя файла (X-File-Name)" });
+    const rawRel = decodeURIComponent(
+      String(req.header("X-Relative-Path") ?? req.header("X-File-Name") ?? ""),
+    );
+    const rel = safeRelPath(rawRel);
+    if (!rel) {
+      res.status(400).json({ error: "не передан корректный путь файла (X-Relative-Path / X-File-Name)" });
       return;
     }
-    const batch =
-      String(req.header("X-Upload-Batch") ?? "")
-        .replace(/[^0-9A-Za-z_-]/g, "")
-        .slice(0, 40) || "без_метки";
     const body = req.body as Buffer;
     if (!Buffer.isBuffer(body) || body.length === 0) {
       res.status(400).json({ error: "пустое тело запроса" });
       return;
     }
-    const dir = path.join(UPLOAD_ROOT, `Загрузка_${batch}`);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, name), body);
-    res.json({ saved: path.relative(UPLOAD_ROOT, path.join(dir, name)) });
+    const target = path.join(UPLOAD_ROOT, `Загрузка_${batchLabel(req)}`, ...rel.split("/"));
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, body);
+    res.json({ saved: path.relative(UPLOAD_ROOT, target) });
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
+/**
+ * Загрузка ZIP-архива: тело запроса — архив целиком. Сервер распаковывает
+ * только `.dcm`-файлы, сохраняя структуру подпапок; имя единственного
+ * корневого каталога архива отбрасывается — то же соглашение, что у
+ * `/predict/zip` API-сервиса (study_folder не включает имя корня).
+ */
+app.post("/api/upload/zip", express.raw({ type: () => true, limit: "512mb" }), (req, res) => {
+  try {
+    const body = req.body as Buffer;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      res.status(400).json({ error: "пустое тело запроса" });
+      return;
+    }
+    let zip: AdmZip;
+    try {
+      zip = new AdmZip(body);
+    } catch {
+      res.status(400).json({ error: "файл не распознан как ZIP-архив" });
+      return;
+    }
+    const entries = zip
+      .getEntries()
+      .filter((entry) => !entry.isDirectory && /\.dcm$/i.test(entry.entryName));
+    if (entries.length === 0) {
+      res.status(400).json({ error: "в архиве нет .dcm-файлов" });
+      return;
+    }
+    const rels = entries.map((entry) => entry.entryName.replaceAll("\\", "/"));
+    const topLevels = new Set(rels.map((rel) => rel.split("/")[0]));
+    const stripRoot = topLevels.size === 1 && rels.every((rel) => rel.includes("/"));
+    const dir = path.join(UPLOAD_ROOT, `Загрузка_${batchLabel(req)}`);
+    let saved = 0;
+    const skipped: string[] = [];
+    for (let i = 0; i < entries.length; i += 1) {
+      const rel = safeRelPath(stripRoot ? rels[i].split("/").slice(1).join("/") : rels[i]);
+      if (!rel) {
+        skipped.push(entries[i].entryName);
+        continue;
+      }
+      const target = path.join(dir, ...rel.split("/"));
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, entries[i].getData());
+      saved += 1;
+    }
+    res.json({ saved, skipped });
   } catch (error) {
     res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
   }

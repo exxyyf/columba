@@ -758,45 +758,114 @@ downloadCsvBtn.addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Загрузка собственных файлов: партия уходит в одну папку-«исследование»,
+// Загрузка собственных снимков: отдельные файлы, папка (структура
+// исследований сохраняется — работает парное определение стороны бедра)
+// или ZIP-архив (распаковывается на сервере). Партия уходит в одну папку,
 // после последнего файла — пересканирование (та же классификация пайплайна).
 // ---------------------------------------------------------------------------
 
 const uploadButton = document.getElementById("upload") as HTMLButtonElement | null;
+const uploadMenu = document.getElementById("upload-menu") as HTMLElement | null;
 const uploadInput = document.getElementById("upload-input") as HTMLInputElement | null;
+const uploadFolderInput = document.getElementById("upload-folder-input") as HTMLInputElement | null;
+const uploadZipInput = document.getElementById("upload-zip-input") as HTMLInputElement | null;
 
-uploadButton?.addEventListener("click", () => uploadInput?.click());
+function toggleUploadMenu(open?: boolean): void {
+  if (!uploadMenu || !uploadButton) return;
+  const show = open ?? uploadMenu.classList.contains("hidden");
+  uploadMenu.classList.toggle("hidden", !show);
+  uploadButton.setAttribute("aria-expanded", String(show));
+}
+
+uploadButton?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  toggleUploadMenu();
+});
+
+uploadMenu?.addEventListener("click", (event) => {
+  const item = (event.target as HTMLElement).closest<HTMLElement>("[data-upload]");
+  if (!item) return;
+  toggleUploadMenu(false);
+  if (item.dataset.upload === "files") uploadInput?.click();
+  else if (item.dataset.upload === "folder") uploadFolderInput?.click();
+  else if (item.dataset.upload === "zip") uploadZipInput?.click();
+});
+
+document.addEventListener("click", (event) => {
+  if (uploadMenu && !uploadMenu.classList.contains("hidden")) {
+    const inside = (event.target as HTMLElement).closest(".upload-menu-wrap");
+    if (!inside) toggleUploadMenu(false);
+  }
+});
 
 uploadInput?.addEventListener("change", () => {
   const files = Array.from(uploadInput.files ?? []);
   uploadInput.value = "";
   if (files.length === 0 || !uploadButton) return;
-  void uploadFiles(files, uploadButton);
+  void uploadFiles(
+    files.map((file) => ({ file, rel: file.name })),
+    uploadButton,
+  );
 });
 
-async function uploadFiles(files: File[], button: HTMLButtonElement): Promise<void> {
+uploadFolderInput?.addEventListener("change", () => {
+  const all = Array.from(uploadFolderInput.files ?? []);
+  uploadFolderInput.value = "";
+  if (!uploadButton) return;
+  // `webkitRelativePath` включает имя ВЫБРАННОЙ папки первым сегментом —
+  // отрезаем его (то же соглашение, что у /predict/zip: имя корня не входит
+  // в relative_path), берём только .dcm.
+  const entries = all
+    .filter((file) => /\.dcm$/i.test(file.name))
+    .map((file) => {
+      const parts = file.webkitRelativePath.split("/");
+      return { file, rel: parts.length > 1 ? parts.slice(1).join("/") : file.name };
+    });
+  if (entries.length === 0) {
+    alert("В выбранной папке нет .dcm-файлов");
+    return;
+  }
+  void uploadFiles(entries, uploadButton);
+});
+
+uploadZipInput?.addEventListener("change", () => {
+  const file = uploadZipInput.files?.[0] ?? null;
+  uploadZipInput.value = "";
+  if (!file || !uploadButton) return;
+  void uploadZip(file, uploadButton);
+});
+
+function newBatchLabel(): string {
+  return new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+}
+
+async function uploadFiles(
+  entries: { file: File; rel: string }[],
+  button: HTMLButtonElement,
+): Promise<void> {
   const label = button.innerHTML;
   button.disabled = true;
-  const batch = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const batch = newBatchLabel();
   const failures: string[] = [];
-  for (let i = 0; i < files.length; i += 1) {
-    button.innerHTML = `Загрузка ${i + 1} из ${files.length}…`;
+  for (let i = 0; i < entries.length; i += 1) {
+    button.innerHTML = `Загрузка ${i + 1} из ${entries.length}…`;
     try {
       const response = await fetch("/api/upload", {
         method: "POST",
-        body: files[i],
+        body: entries[i].file,
         headers: {
           "Content-Type": "application/octet-stream",
-          "X-File-Name": encodeURIComponent(files[i].name),
+          "X-File-Name": encodeURIComponent(entries[i].file.name),
+          "X-Relative-Path": encodeURIComponent(entries[i].rel),
           "X-Upload-Batch": batch,
         },
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({ error: response.statusText }));
-        failures.push(`${files[i].name}: ${String(body.error ?? response.statusText)}`);
+        failures.push(`${entries[i].rel}: ${String(body.error ?? response.statusText)}`);
       }
     } catch (error) {
-      failures.push(`${files[i].name}: ${String(error instanceof Error ? error.message : error)}`);
+      failures.push(`${entries[i].rel}: ${String(error instanceof Error ? error.message : error)}`);
     }
   }
   button.innerHTML = label;
@@ -804,8 +873,39 @@ async function uploadFiles(files: File[], button: HTMLButtonElement): Promise<vo
   if (failures.length > 0) {
     alert(`Не удалось загрузить:\n${failures.join("\n")}`);
   }
-  if (failures.length < files.length) {
+  if (failures.length < entries.length) {
     await loadManifest(true);
+  }
+}
+
+async function uploadZip(file: File, button: HTMLButtonElement): Promise<void> {
+  const label = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = "Загрузка архива…";
+  try {
+    const response = await fetch("/api/upload/zip", {
+      method: "POST",
+      body: file,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "X-Upload-Batch": newBatchLabel(),
+      },
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      alert(`Не удалось загрузить архив: ${String(body.error ?? response.statusText)}`);
+      return;
+    }
+    const skipped = Array.isArray(body.skipped) ? body.skipped.length : 0;
+    if (skipped > 0) {
+      alert(`Пропущено записей с некорректными путями: ${skipped}`);
+    }
+    await loadManifest(true);
+  } catch (error) {
+    alert(`Не удалось загрузить архив: ${String(error instanceof Error ? error.message : error)}`);
+  } finally {
+    button.innerHTML = label;
+    button.disabled = false;
   }
 }
 document.getElementById("modal-close")?.addEventListener("click", closeModal);
