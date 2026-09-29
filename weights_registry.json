@@ -1,0 +1,41 @@
+{
+  "$comment": "Машиночитаемый реестр весов CNN-моделей. Источник истины для WEIGHTS.md и для columba.weights (verify/download). sha256/размер обновляются при каждом переобучении; url вписывается вручную после загрузки в хранилище.",
+  "entries": [
+    {
+      "name": "region_cnn.pt",
+      "config_attr": "REGION_CNN_WEIGHTS",
+      "size_bytes": 44790219,
+      "sha256": "9b4b5fafef24cc58f9addb3a652e029c458e6688cc68fe5de8ef2ad77a61a1eb",
+      "reproduce": "uv run python -m columba.train_region_cnn",
+      "url": "https://drive.google.com/file/d/1EU2uHsKBt8lMV-BDUDYPzEO5JyDt7Y9g/view",
+      "role": "Страховка эвристики региона/стороны (этап 1, inference.py _arbitrate/region_cnn.arbitrate_region). Без файла load_region_predictor() возвращает None: регион/сторона берутся из чистой эвристики по ширине кадра (подтверждена организаторами), region_disagreement всегда False (сравнивать не с чем), а на нестандартной ширине кадра (не 300/280/248 px) региона вообще не будет — там приоритет у CNN, эвристика для таких кадров не определена."
+    },
+    {
+      "name": "spine_keypoint_unet.pt",
+      "config_attr": "SPINE_UNET_WEIGHTS",
+      "size_bytes": 1973035,
+      "sha256": "dff5c689415c0fc1f9acf2cea33f23bdb130225b39c97aa1597fb67c30f73fdc",
+      "reproduce": "uv run python -m columba.spine_keypoint_net",
+      "url": "https://drive.google.com/file/d/1PYU_DxOMDE2drLsARaNbmVjIkUaDPX2q/view",
+      "role": "Обучена (spine_keypoint_net.py), но не используется в рантайм-пути: get_spine_keypoints (spine_checkers.py) по умолчанию вызывается без unet_predictor, детектор центров тел позвонков всегда классический (DP-хребет). Файл читается только отдельным скриптом spine_unet_check.py, не инференсом/сервисом — отсутствие файла не влияет на инференс вообще."
+    },
+    {
+      "name": "spine_objects_cnn.pt",
+      "config_attr": "SPINE_OBJECTS_CNN_WEIGHTS",
+      "size_bytes": 44786955,
+      "sha256": "c9bbc66d1dca50a7688014cd386908d636b6380f0542d98f34d569b554aca9c1",
+      "reproduce": "uv run python -m columba.spine_objects_cnn",
+      "url": "https://drive.google.com/file/d/1f4z5yibnm69uTDJh9twTY0WQifJGI7pF/view",
+      "role": "Вспомогательная CNN-ветка чекера «Присутствуют посторонние предметы» (check_spine_objects, spine_checkers.py). Решающий скор/флаг ВСЕГДА rule-based (по вложенной CV rule-based точнее: OOF AUC 0.820 против 0.772 у CNN) — CNN-вероятность лишь дописывается в signals['cnn_probability'], когда predictor передан. Без файла флаг и quality_prob не меняются, просто signals['cnn_probability'] отсутствует."
+    },
+    {
+      "name": "hip_positioning_cnn.pt",
+      "config_attr": "HIP_POSITIONING_CNN_WEIGHTS",
+      "size_bytes": 44789067,
+      "sha256": "a0393374d2b7ce90163d192ccb0f459ff088369c41ffc527abba3ea420a5aa59",
+      "reproduce": "Colab: notebooks/hip_positioning_cnn.ipynb (данные — hip_export.py, seed 42)",
+      "url": "https://drive.google.com/file/d/1u0SiWHR51JTEgBH9CWrkqqOys19DZtpy/view",
+      "role": "Единственный источник score/flag чекера hip_positioning (check_hip_positioning, hip_checkers.py) — по вложенной CV геометрия одна статистически не отличима от случайного (nested CV AUC 0.564 [0.452; 0.684]), CNN даёт 0.765. Без файла cnn_predictor is None, check_hip_positioning ВСЕГДА возвращает not_evaluated: тип «Некорректная укладка» для бедра НИКОГДА не выставляется. Агрегатор (_hip_row_prediction, aggregate.py) тогда берёт quality_prob/class бедра только из hip_roi (если он ok), а если и hip_roi not_evaluated — откатывается на приор HIP_PRIOR_QUALITY_PROB с quality_class=0. Пайплайн не падает, но чекер укладки бедра фактически отключён."
+    }
+  ]
+}

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#10263f" />
+  <title>Columba — контроль качества DXA</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <a class="skip-link" href="#upload-panel">Перейти к загрузке</a>
+
+  <div class="site-shell">
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Columba — главная">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span class="brand-name">Columba</span>
+      </a>
+      <div class="service-state">
+        <span class="state-dot" aria-hidden="true"></span>
+        Локальный сервис анализа
+      </div>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <p class="intro-purpose">Контроль качества денситограмм</p>
+        <h1 id="page-title">Проверьте DXA-исследование перед отправкой</h1>
+        <p>Загрузите DICOM-файлы. Columba определит регион, проверит качество позиционирования и покажет, какие снимки требуют внимания.</p>
+      </section>
+
+      <section class="panel upload-panel" id="upload-panel" aria-labelledby="upload-title">
+        <div class="panel-heading">
+          <span class="step-number" aria-hidden="true">1</span>
+          <div>
+            <h2 id="upload-title">Выберите источник</h2>
+            <p>Используйте один способ загрузки. Новый выбор заменит предыдущий.</p>
+          </div>
+        </div>
+
+        <div class="upload-note">
+          <strong>Для полного анализа лучше выбрать папку.</strong>
+          Структура исследований сохранится, и сервис сможет определить сторону бедра. В ZIP-анализе просмотр визуализации недоступен.
+        </div>
+
+        <div class="upload-controls">
+          <div class="upload-field" data-upload-mode="flat">
+            <h3>Отдельные файлы</h3>
+            <p>Один или несколько файлов без структуры папок.</p>
+            <label for="file-input">Выбрать DICOM-файлы</label>
+            <input type="file" id="file-input" multiple accept=".dcm,application/dicom" />
+          </div>
+
+          <div class="upload-field recommended" data-upload-mode="folder">
+            <span class="recommendation">Рекомендуется</span>
+            <h3>Папка исследований</h3>
+            <p>Сохраняет группы исследований и парное определение стороны.</p>
+            <label for="folder-input">Выбрать папку</label>
+            <input type="file" id="folder-input" webkitdirectory multiple />
+          </div>
+
+          <div class="upload-field" data-upload-mode="zip">
+            <h3>ZIP-архив</h3>
+            <p>Подходит для пакетной проверки без просмотра снимков.</p>
+            <label for="zip-input">Выбрать ZIP-архив</label>
+            <input type="file" id="zip-input" accept=".zip,application/zip" />
+          </div>
+        </div>
+
+        <div class="action-row">
+          <button id="analyze-btn" type="button" disabled>Начать анализ</button>
+          <span id="status" class="status" role="status" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <section class="panel" id="results-panel" aria-labelledby="results-title" hidden>
+        <div class="panel-heading results-heading">
+          <span class="step-number" aria-hidden="true">2</span>
+          <div>
+            <h2 id="results-title">Результаты анализа</h2>
+            <p>Каждая строка соответствует одному загруженному файлу.</p>
+          </div>
+          <button id="download-csv-btn" class="secondary" type="button" hidden>Скачать CSV</button>
+        </div>
+
+        <p id="summary" class="summary" role="status" aria-live="polite" hidden></p>
+        <div class="table-wrap" tabindex="0" aria-label="Прокручиваемая таблица результатов">
+          <table id="results-table">
+            <caption class="visually-hidden">Результаты анализа загруженных файлов, по строке на файл</caption>
+            <thead>
+              <tr>
+                <th scope="col">Файл</th>
+                <th scope="col">Регион</th>
+                <th scope="col">Оценка</th>
+                <th scope="col">Тип нарушения</th>
+                <th scope="col">Вероятность</th>
+                <th scope="col">Снимок</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="viz-panel" aria-labelledby="viz-title" hidden>
+        <div class="panel-heading">
+          <span class="step-number" aria-hidden="true">3</span>
+          <div>
+            <h2 id="viz-title">Разбор снимка</h2>
+            <p>Ориентиры наложены на кадр, а результаты проверок собраны рядом.</p>
+          </div>
+        </div>
+        <div class="viz-layout">
+          <div class="image-stage"><img id="viz-image" alt="" /></div>
+          <dl id="viz-info" class="viz-info"></dl>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>Техническая информация:</span>
+      <a href="/docs">OpenAPI</a>
+      <a href="/health">Состояние сервиса</a>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

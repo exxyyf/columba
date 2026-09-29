@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#10263f" />
+  <title>Columba — просмотр DXA-снимков</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#gallery">Перейти к снимкам</a>
+
+  <div class="app-shell">
+    <header class="hero">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <div>
+          <p class="brand-name">Columba</p>
+          <h1>Просмотр и контроль DXA-снимков</h1>
+          <p class="brand-sub">Регион определяется пайплайном: эвристика и CNN работают согласованно.</p>
+        </div>
+      </div>
+      <div class="system-state" aria-label="Режим работы">
+        <span class="state-dot" aria-hidden="true"></span>
+        <span>
+          <strong>Локальный анализ</strong>
+          <small>Снимки остаются на этом компьютере</small>
+        </span>
+      </div>
+    </header>
+
+    <section class="workspace" aria-label="Поиск и фильтры">
+      <div class="search-field">
+        <label for="search">Найти снимок</label>
+        <input id="search" type="search" placeholder="Имя файла, папка или исследование" autocomplete="off" />
+      </div>
+
+      <div class="filter-block">
+        <span class="control-label">Показать</span>
+        <div class="filters" id="filters" role="group" aria-label="Фильтр снимков">
+          <button class="filter active" type="button" data-filter="all" aria-pressed="true">Все</button>
+          <button class="filter" type="button" data-filter="spine" aria-pressed="false">Позвоночник</button>
+          <button class="filter" type="button" data-filter="hip-left" aria-pressed="false">Левое бедро</button>
+          <button class="filter" type="button" data-filter="hip-right" aria-pressed="false">Правое бедро</button>
+          <button class="filter" type="button" data-filter="attention" aria-pressed="false">Требуют внимания</button>
+        </div>
+      </div>
+
+      <button id="rescan" class="rescan" type="button" title="Перечитать каталоги и повторить классификацию">
+        <span class="rescan-icon" aria-hidden="true">↻</span>
+        Пересканировать
+      </button>
+    </section>
+
+    <section id="summary" class="summary" aria-label="Сводка по снимкам" aria-live="polite"></section>
+    <aside id="warnings" class="warnings hidden" aria-label="Предупреждения" role="status"></aside>
+
+    <main id="gallery" class="gallery">
+      <div class="section-heading">
+        <div>
+          <h2>Снимки</h2>
+          <p>Откройте карточку, чтобы рассмотреть изображение и параметры классификации.</p>
+        </div>
+        <p class="gallery-hint">Цвет метки показывает регион, текст — точное состояние.</p>
+      </div>
+      <div id="grid" class="grid">
+        <div class="loading" id="loading">
+          <span class="loading-indicator" aria-hidden="true"></span>
+          Загрузка и классификация снимков…
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-body">
+      <button class="modal-close" id="modal-close" type="button" aria-label="Закрыть окно">✕</button>
+      <div class="modal-canvas-wrap"><canvas id="modal-canvas"></canvas></div>
+      <div class="modal-meta" id="modal-meta"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
