@@ -69,6 +69,12 @@ let activeFilter = "all";
 let searchQuery = "";
 let quality: QualityResponse = { state: "idle" };
 let qualityTimer: number | null = null;
+/** Активный фильтр по типу нарушения (строка словаря) или null — все. */
+let activeViolation: string | null = null;
+/** Свёрнута ли группа «без нарушений»; null — по умолчанию (зависит от размера). */
+let cleanCollapsed: boolean | null = null;
+/** Сколько «чистых» снимков показываем без сворачивания. */
+const CLEAN_COLLAPSE_THRESHOLD = 12;
 const pixelCache = new Map<string, ImageBitmap>();
 
 const grid = document.getElementById("grid") as HTMLElement;
@@ -114,7 +120,14 @@ async function pollQuality(): Promise<void> {
     quality = { state: "error", message: "сервис качества недоступен" };
   }
   renderSummary();
-  updateQualityBadges();
+  renderViolationFilters();
+  if (quality.state === "ready") {
+    // Появились итоговые результаты: сетка перегруппировывается
+    // (нарушения наверх, «чистые» — в сворачиваемую группу).
+    renderGrid();
+  } else {
+    updateQualityBadges();
+  }
   if (quality.state === "running") {
     qualityTimer = window.setTimeout(() => void pollQuality(), 2500);
   }
@@ -142,6 +155,54 @@ function updateQualityBadges(): void {
   document.querySelectorAll<HTMLElement>("[data-quality-for]").forEach((slot) => {
     slot.innerHTML = qualityBadge(slot.dataset.qualityFor ?? "");
   });
+}
+
+// ---------------------------------------------------------------------------
+// Фильтр по типам нарушений (строки словаря организаторов)
+// ---------------------------------------------------------------------------
+
+function violationTypes(row: QualityRow): string[] {
+  return row.violation_type
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+function violationCounts(): Map<string, number> {
+  const counts = new Map<string, number>();
+  if (!quality.results) return counts;
+  for (const row of Object.values(quality.results)) {
+    if (row.quality_class !== 1) continue;
+    for (const type of violationTypes(row)) {
+      counts.set(type, (counts.get(type) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+function renderViolationFilters(): void {
+  const container = document.getElementById("violation-filters");
+  if (!container) return;
+  const counts = quality.state === "ready" ? violationCounts() : new Map<string, number>();
+  if (counts.size === 0) {
+    container.classList.add("hidden");
+    if (activeViolation !== null) {
+      activeViolation = null;
+      renderGrid();
+    }
+    return;
+  }
+  if (activeViolation !== null && !counts.has(activeViolation)) {
+    activeViolation = null;
+  }
+  container.classList.remove("hidden");
+  const chips = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  container.innerHTML = chips
+    .map(([type, count]) => {
+      const active = type === activeViolation;
+      return `<button class="filter ${active ? "active" : ""}" type="button" data-violation="${escapeAttr(type)}" aria-pressed="${active}">${escapeHtml(type)}<span class="filter-count">${count}</span></button>`;
+    })
+    .join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +306,13 @@ function passesFilter(file: ViewerFile): boolean {
   }
 }
 
+function passesViolation(file: ViewerFile): boolean {
+  if (activeViolation === null) return true;
+  const row = qualityFor(file.id);
+  if (!row || row.quality_class !== 1) return false;
+  return violationTypes(row).includes(activeViolation);
+}
+
 function passesSearch(file: ViewerFile): boolean {
   if (!searchQuery) return true;
   const haystack = `${file.file_name} ${file.relative_path} ${file.study_folder}`.toLowerCase();
@@ -267,29 +335,83 @@ const observer = new IntersectionObserver(
 function renderGrid(): void {
   if (!manifest) return;
   observer.disconnect();
-  const files = manifest.files.filter((f) => passesFilter(f) && passesSearch(f));
+  const files = manifest.files.filter((f) => passesFilter(f) && passesSearch(f) && passesViolation(f));
   if (files.length === 0) {
     grid.innerHTML = `<div class="loading">Ничего не найдено</div>`;
     return;
   }
   grid.innerHTML = "";
-  for (const file of files) {
-    const card = document.createElement("button");
-    card.className = "card";
-    card.type = "button";
-    card.dataset.fileId = file.id;
-    card.setAttribute("aria-label", `Открыть снимок ${file.file_name}`);
-    card.innerHTML = `
-      <div class="thumb"><canvas></canvas></div>
-      <div class="card-info">
-        <div class="card-title" title="${escapeAttr(file.file_name)}">${escapeHtml(file.file_name)}</div>
-        <div class="card-path" title="${escapeAttr(file.relative_path)}">${escapeHtml(shortStudy(file))}</div>
-        <div class="badges">${badges(file)}<span data-quality-for="${escapeAttr(file.id)}">${qualityBadge(file.id)}</span></div>
-      </div>`;
-    card.addEventListener("click", () => openModal(file));
-    grid.appendChild(card);
-    observer.observe(card);
+
+  // Пока контроль качества не досчитан — плоская сетка, как раньше.
+  if (quality.state !== "ready" || !quality.results) {
+    files.forEach(appendCard);
+    return;
   }
+
+  const violated = files.filter((f) => qualityFor(f.id)?.quality_class === 1);
+  const clean = files.filter((f) => qualityFor(f.id)?.quality_class === 0);
+  const unchecked = files.filter((f) => !qualityFor(f.id));
+
+  // Группировка нужна, только когда есть что отделять: без нарушений
+  // в текущей выборке сетка остаётся плоской.
+  if (violated.length === 0 || clean.length + unchecked.length === 0) {
+    files.forEach(appendCard);
+    return;
+  }
+
+  appendGroupHeader(`✕ С нарушениями`, violated.length, "group-violated");
+  violated.forEach(appendCard);
+
+  if (clean.length > 0) {
+    const collapsed = cleanCollapsed ?? clean.length > CLEAN_COLLAPSE_THRESHOLD;
+    appendCleanHeader(clean.length, collapsed);
+    if (!collapsed) clean.forEach(appendCard);
+  }
+  if (unchecked.length > 0) {
+    appendGroupHeader("Без результата проверки", unchecked.length, "");
+    unchecked.forEach(appendCard);
+  }
+}
+
+function appendCard(file: ViewerFile): void {
+  const card = document.createElement("button");
+  card.className = "card";
+  card.type = "button";
+  card.dataset.fileId = file.id;
+  card.setAttribute("aria-label", `Открыть снимок ${file.file_name}`);
+  card.innerHTML = `
+    <div class="thumb"><canvas></canvas></div>
+    <div class="card-info">
+      <div class="card-title" title="${escapeAttr(file.file_name)}">${escapeHtml(file.file_name)}</div>
+      <div class="card-path" title="${escapeAttr(file.relative_path)}">${escapeHtml(shortStudy(file))}</div>
+      <div class="badges">${badges(file)}<span data-quality-for="${escapeAttr(file.id)}">${qualityBadge(file.id)}</span></div>
+    </div>`;
+  card.addEventListener("click", () => openModal(file));
+  grid.appendChild(card);
+  observer.observe(card);
+}
+
+function appendGroupHeader(title: string, count: number, extraClass: string): void {
+  const header = document.createElement("div");
+  header.className = `group-header ${extraClass}`.trim();
+  header.innerHTML = `<span class="group-title">${escapeHtml(title)}</span><span class="group-count">${count}</span>`;
+  grid.appendChild(header);
+}
+
+function appendCleanHeader(count: number, collapsed: boolean): void {
+  const header = document.createElement("button");
+  header.type = "button";
+  header.className = "group-header group-clean group-toggle";
+  header.setAttribute("aria-expanded", String(!collapsed));
+  header.innerHTML = `
+    <span class="group-title">✓ Без нарушений</span>
+    <span class="group-count">${count}</span>
+    <span class="group-action">${collapsed ? "Показать ▾" : "Свернуть ▴"}</span>`;
+  header.addEventListener("click", () => {
+    cleanCollapsed = !collapsed;
+    renderGrid();
+  });
+  grid.appendChild(header);
 }
 
 function shortStudy(file: ViewerFile): string {
@@ -463,6 +585,16 @@ document.getElementById("filters")?.addEventListener("click", (event) => {
   target.classList.add("active");
   target.setAttribute("aria-pressed", "true");
   activeFilter = target.dataset.filter ?? "all";
+  cleanCollapsed = null;
+  renderGrid();
+});
+
+document.getElementById("violation-filters")?.addEventListener("click", (event) => {
+  const target = (event.target as HTMLElement).closest<HTMLElement>(".filter");
+  if (!target) return;
+  const type = target.dataset.violation ?? null;
+  activeViolation = activeViolation === type ? null : type;
+  renderViolationFilters();
   renderGrid();
 });
 
