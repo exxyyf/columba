@@ -4,8 +4,13 @@
 # Let's Encrypt сертификат без покупки домена.
 #
 # Hash пароля: caddy hash-password --plaintext '<пароль>'
+#
+# Главный хост отдаёт единый веб-интерфейс (interface/, порт 8425):
+# галерея, загрузка, контроль качества, разбор снимка. API-хост — тот же
+# FastAPI-сервис инференса (порт 8000): /docs, /predict, /visualize;
+# своего веб-интерфейса у API нет.
 
-{$VIEWER_HOST} {
+{$MAIN_HOST} {
     basic_auth {
         columba {$PASSWORD_HASH}
     }

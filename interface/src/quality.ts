@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 
 import type { Manifest, ManifestFile } from "./manifest.js";
 
-const API_URL = process.env.COLUMBA_API_URL ?? "http://127.0.0.1:8000";
+export const API_URL = process.env.COLUMBA_API_URL ?? "http://127.0.0.1:8000";
 /** Ограничители пачки: файлов и суммарных байт на один запрос к /predict. */
 const CHUNK_FILES = 48;
 const CHUNK_BYTES = 48 * 1024 * 1024;

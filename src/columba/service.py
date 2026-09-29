@@ -16,8 +16,9 @@ HTTP-обёртка над уже существующим `inference.run_infere
 
 Эндпоинты:
 
-* `GET /` — веб-интерфейс (этап 8, бонус 2): загрузка файлов, таблица
-  результатов, просмотр визуализации по клику. Статика — `static/`.
+* `GET /` — редирект на `/docs`. Веб-интерфейс один — просмотрщик
+  `interface/` (галерея, загрузка, контроль качества, разбор снимка);
+  он ходит сюда в `/predict` и `/visualize`.
 * `POST /predict` — список DICOM-файлов. Без `paths` — плоский список
   (сторона бедра методом `content_only`, парное разведение недоступно, т.к.
   структура исследований не передаётся); с `paths` (задача 9.6, по одному
@@ -51,8 +52,7 @@ from typing import Literal
 
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
 
 from . import config as cfg
 from .dicom_io import STATUS_SUCCESS, normalize, read_dicom
@@ -62,19 +62,17 @@ from .inventory import DICOM_SUFFIX
 from .region_cnn import default_device
 from .visualize import figure_to_png_bytes, render_violation_overlay
 
-STATIC_DIR = Path(__file__).parent / "static"
-
 app = FastAPI(
     title="columba",
     description="Определение качества исследования денситограммы (формат — README, «Формат входных и выходных данных»).",
     version="0.1.0",
 )
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/")
-def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+def index() -> RedirectResponse:
+    """Своего веб-интерфейса у API нет — единый интерфейс живёт в `interface/`."""
+    return RedirectResponse("/docs")
 
 
 @app.get("/health")
@@ -116,8 +114,9 @@ def _dedupe_filename(name: str, seen: dict[str, int]) -> str:
     (ключ словаря/значение из `webkitRelativePath`), а не путь файловой
     системы текущей ОС — на Windows-сервере обычный `Path` превратил бы
     разделители в бэкслеши и сломал сравнение со строками, которые прислал
-    браузер. Тот же алгоритм в порядке добавления файлов повторён в
-    `static/app.js` (`dedupeName`) — клиент и сервер видят файлы в одном
+    браузер. Тот же алгоритм в порядке добавления файлов может повторить
+    любой клиент (раньше — `static/app.js`, теперь пачки шлёт
+    `interface/src/quality.ts` с уникальными `relative_path`) — клиент и сервер видят файлы в одном
     порядке (FastAPI сохраняет порядок частей формы с одинаковым именем
     поля), поэтому независимо вычисленные уникальные имена совпадают без
     обмена дополнительными данными, и таблица результатов (`row.file_name`)
@@ -157,8 +156,8 @@ def _save_uploads_structured(files: list[UploadFile], relpaths: list[str], targe
     """Сохранить пачку С сохранением относительной структуры папок (задача 9.6).
 
     `relpaths[i]` — путь файла `files[i]` относительно ВЫБРАННОЙ пользователем
-    папки, БЕЗ имени самой этой папки (клиент — `static/app.js` — сам отрезает
-    первый сегмент `File.webkitRelativePath`, тем же способом, каким
+    папки, БЕЗ имени самой этой папки (браузерный клиент отрезает
+    первый сегмент `File.webkitRelativePath` сам, тем же способом, каким
     `/predict/zip` не видит имя корневого каталога архива). Значит
     `study_folder`, который из этой структуры посчитает
     `inference._study_key`, — те же подпапки, что реально выбрал
@@ -222,7 +221,7 @@ async def predict(
 ) -> JSONResponse | PlainTextResponse:
     """Плоский список файлов, либо (задача 9.6) папка с относительной
     структурой, если клиент прислал `paths` (по одному на каждый `files[i]`,
-    в том же порядке — см. `static/app.js`, режим «папка»). С `paths` доступно
+    в том же порядке — так шлёт пачки `interface/src/quality.ts`). С `paths` доступно
     парное определение стороны бедра внутри исследования, как у `/predict/zip`
     (`_save_uploads_structured`); без него — плоский режим без изменений
     (`_save_uploads_flat`, метод `content_only`).

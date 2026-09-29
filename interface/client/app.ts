@@ -84,6 +84,27 @@ const searchInput = document.getElementById("search") as HTMLInputElement;
 const modal = document.getElementById("modal") as HTMLElement;
 const modalCanvas = document.getElementById("modal-canvas") as HTMLCanvasElement;
 const modalMeta = document.getElementById("modal-meta") as HTMLElement;
+const modalOverlay = document.getElementById("modal-overlay") as HTMLImageElement;
+const overlayToggle = document.getElementById("overlay-toggle") as HTMLButtonElement;
+const downloadCsvBtn = document.getElementById("download-csv") as HTMLButtonElement;
+
+/** Снимок, открытый в модалке (защита от гонок асинхронных дозагрузок). */
+let modalFileId: string | null = null;
+/** id -> objectURL PNG-оверлея из /api/visualize (кэш на сессию). */
+const overlayCache = new Map<string, string>();
+
+interface VizChecker {
+  status: string;
+  flag: boolean | null;
+  score: number | null;
+  reason: string | null;
+}
+
+interface VizInfo {
+  region: string;
+  side: string | null;
+  checkers: Record<string, VizChecker>;
+}
 
 // ---------------------------------------------------------------------------
 // Загрузка манифеста
@@ -121,6 +142,10 @@ async function pollQuality(): Promise<void> {
   }
   renderSummary();
   renderViolationFilters();
+  downloadCsvBtn.classList.toggle(
+    "hidden",
+    !(quality.state === "ready" && Object.keys(quality.results ?? {}).length > 0),
+  );
   if (quality.state === "ready") {
     // Появились итоговые результаты: сетка перегруппировывается
     // (нарушения наверх, «чистые» — в сворачиваемую группу).
@@ -503,6 +528,10 @@ function openModal(file: ViewerFile): void {
   document.body.style.overflow = "hidden";
   modalCanvas.width = 1;
   modalCanvas.height = 1;
+  modalFileId = file.id;
+  hideOverlay();
+  overlayToggle.disabled = false;
+  overlayToggle.classList.toggle("hidden", file.read_status !== "Success");
 
   const rows: [string, string][] = [
     ["Файл", file.file_name],
@@ -547,16 +576,105 @@ function openModal(file: ViewerFile): void {
     <p class="modal-label">Сведения о снимке</p>
     <h2 id="modal-title">${escapeHtml(file.file_name)}</h2>
     <div class="sub">${escapeHtml(file.root)}</div>
-    <dl>${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join("")}</dl>`;
+    <dl>${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join("")}</dl>
+    <div id="modal-checkers" class="modal-checkers"><p class="modal-label">Проверки</p><div class="checkers-loading">загружаются…</div></div>`;
 
   fetchBitmap(file.id)
     .then((bitmap) => drawToCanvas(modalCanvas, bitmap))
     .catch(() => undefined);
+
+  if (file.read_status === "Success") {
+    void loadCheckers(file.id);
+  } else {
+    const box = modalMeta.querySelector("#modal-checkers");
+    if (box) box.innerHTML = "";
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Разбор снимка: результаты чекеров и оверлей ориентиров из /visualize
+// ---------------------------------------------------------------------------
+
+const CHECKER_STATUS_RU: Record<string, string> = { not_evaluated: "не оценено" };
+
+async function loadCheckers(id: string): Promise<void> {
+  let html: string;
+  try {
+    const response = await fetch(`/api/visualize/${encodeURIComponent(id)}?format=json`);
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(String(body.error ?? response.status));
+    }
+    const info = (await response.json()) as VizInfo;
+    const rows = Object.entries(info.checkers ?? {}).map(([name, checker]) => {
+      let verdict: string;
+      let cls = "";
+      if (checker.status !== "ok") {
+        verdict = CHECKER_STATUS_RU[checker.status] ?? checker.status;
+        if (checker.reason) verdict += ` — ${checker.reason}`;
+      } else if (checker.flag) {
+        verdict = "нарушение";
+        cls = "checker-flag";
+      } else {
+        verdict = "норма";
+        cls = "checker-ok";
+      }
+      const score =
+        checker.status === "ok" && checker.score !== null && Number.isFinite(checker.score)
+          ? ` <span class="checker-score">score ${Number(checker.score).toFixed(3)}</span>`
+          : "";
+      return `<dt>${escapeHtml(name)}</dt><dd class="${cls}">${escapeHtml(verdict)}${score}</dd>`;
+    });
+    html = rows.length > 0 ? `<p class="modal-label">Проверки</p><dl>${rows.join("")}</dl>` : "";
+  } catch (error) {
+    html = `<p class="modal-label">Проверки</p><div class="checkers-loading">недоступны: ${escapeHtml(String(error instanceof Error ? error.message : error))}</div>`;
+  }
+  if (modalFileId !== id) return; // за время запроса открыли другой снимок
+  const box = modalMeta.querySelector("#modal-checkers");
+  if (box) box.innerHTML = html;
+}
+
+function hideOverlay(): void {
+  modalOverlay.classList.add("hidden");
+  modalOverlay.removeAttribute("src");
+  modalCanvas.classList.remove("hidden");
+  overlayToggle.textContent = "Показать разметку";
+}
+
+overlayToggle.addEventListener("click", () => {
+  if (!modalOverlay.classList.contains("hidden")) {
+    hideOverlay();
+    return;
+  }
+  const id = modalFileId;
+  if (!id) return;
+  void (async () => {
+    overlayToggle.disabled = true;
+    try {
+      let url = overlayCache.get(id);
+      if (!url) {
+        const response = await fetch(`/api/visualize/${encodeURIComponent(id)}?format=png`);
+        if (!response.ok) throw new Error(`оверлей не загрузился (${response.status})`);
+        url = URL.createObjectURL(await response.blob());
+        overlayCache.set(id, url);
+      }
+      if (modalFileId !== id) return;
+      modalOverlay.src = url;
+      modalOverlay.classList.remove("hidden");
+      modalCanvas.classList.add("hidden");
+      overlayToggle.textContent = "Скрыть разметку";
+    } catch {
+      overlayToggle.textContent = "Разметка недоступна";
+    } finally {
+      overlayToggle.disabled = false;
+    }
+  })();
+});
 
 function closeModal(): void {
   modal.classList.add("hidden");
   document.body.style.overflow = "";
+  modalFileId = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -604,6 +722,40 @@ searchInput.addEventListener("input", () => {
 });
 
 document.getElementById("rescan")?.addEventListener("click", () => void loadManifest(true));
+
+// ---------------------------------------------------------------------------
+// Скачивание результатов контроля качества (те же колонки, что сабмит)
+// ---------------------------------------------------------------------------
+
+function csvField(value: unknown): string {
+  const text = value === null || value === undefined ? "" : String(value);
+  return /["\n,;]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+downloadCsvBtn.addEventListener("click", () => {
+  if (!manifest || !quality.results) return;
+  const lines = ["file_name,anatomical_region,quality_class,quality_prob,violation_type"];
+  for (const file of manifest.files) {
+    const row = qualityFor(file.id);
+    if (!row) continue;
+    lines.push(
+      [
+        csvField(file.relative_path),
+        csvField(row.anatomical_region),
+        csvField(row.quality_class),
+        csvField(row.quality_prob),
+        csvField(row.violation_type),
+      ].join(","),
+    );
+  }
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "columba_results.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+});
 
 // ---------------------------------------------------------------------------
 // Загрузка собственных файлов: партия уходит в одну папку-«исследование»,

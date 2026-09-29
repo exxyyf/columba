@@ -699,7 +699,11 @@ h1 {
   position: relative;
   display: grid;
   grid-template-columns: minmax(360px, 1.5fr) minmax(330px, 0.8fr);
+  /* Ряд ограничен высотой окна: иначе длинные метаданные растягивают
+     ряд по контенту, и центрированный канвас уезжает за экран. */
+  grid-template-rows: minmax(0, 1fr);
   width: min(1180px, 96vw);
+  height: 92vh;
   max-height: 92vh;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -717,9 +721,80 @@ h1 {
   background: var(--viewer);
 }
 
-.modal-canvas-wrap canvas {
+.modal-canvas-wrap {
+  position: relative;
+}
+
+.modal-canvas-wrap canvas,
+.modal-canvas-wrap img {
   max-width: 100%;
   max-height: calc(92vh - 40px);
+}
+
+.modal-canvas-wrap img {
+  border-radius: 6px;
+  background: #fff;
+  object-fit: contain;
+}
+
+.overlay-toggle {
+  position: absolute;
+  bottom: 18px;
+  left: 18px;
+  z-index: 2;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 10px;
+  background: rgba(7, 16, 25, 0.78);
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  backdrop-filter: blur(6px);
+}
+
+.overlay-toggle:hover:not(:disabled) {
+  border-color: #fff;
+}
+
+.overlay-toggle:disabled {
+  color: rgba(255, 255, 255, 0.6);
+  cursor: wait;
+}
+
+.overlay-toggle:focus-visible {
+  outline: 3px solid var(--blue);
+  outline-offset: 3px;
+}
+
+.modal-checkers {
+  margin-top: 22px;
+}
+
+.modal-checkers .modal-label {
+  margin-bottom: 6px;
+}
+
+.checkers-loading {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.checker-flag {
+  color: var(--alert) !important;
+}
+
+.checker-ok {
+  color: #1e6b34 !important;
+}
+
+.checker-score {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
 }
 
 .modal-meta {
@@ -846,7 +921,9 @@ h1 {
 
   .modal-body {
     grid-template-columns: 1fr;
+    grid-template-rows: none;
     width: min(680px, 100%);
+    height: auto;
     overflow-y: auto;
   }
 

@@ -58,6 +58,11 @@
         <span class="rescan-icon" aria-hidden="true">↻</span>
         Пересканировать
       </button>
+
+      <button id="download-csv" class="rescan hidden" type="button" title="Скачать результаты контроля качества (формат сабмита)">
+        <span class="rescan-icon" aria-hidden="true">⭳</span>
+        Скачать CSV
+      </button>
     </section>
 
     <section id="summary" class="summary" aria-label="Сводка по снимкам" aria-live="polite"></section>
@@ -83,7 +88,11 @@
   <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <div class="modal-body">
       <button class="modal-close" id="modal-close" type="button" aria-label="Закрыть окно">✕</button>
-      <div class="modal-canvas-wrap"><canvas id="modal-canvas"></canvas></div>
+      <div class="modal-canvas-wrap">
+        <canvas id="modal-canvas"></canvas>
+        <img id="modal-overlay" class="hidden" alt="Кадр с наложенными анатомическими ориентирами" />
+        <button id="overlay-toggle" class="overlay-toggle hidden" type="button">Показать разметку</button>
+      </div>
       <div class="modal-meta" id="modal-meta"></div>
     </div>
   </div>

@@ -183,21 +183,15 @@ def test_predict_structured_paths_count_mismatch_is_a_client_error():
 
 
 # --------------------------------------------------------------------------- #
-# Веб-интерфейс: GET /, статика, POST /visualize (этап 8, бонусы 1-2)
+# GET / (редирект на /docs — единый веб-интерфейс живёт в interface/),
+# POST /visualize (этап 8, бонус 1)
 # --------------------------------------------------------------------------- #
 
 
-def test_index_page_served():
-    response = client.get("/")
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/html")
-    assert "columba" in response.text.lower()
-
-
-def test_static_assets_served():
-    for path in ("/static/style.css", "/static/app.js"):
-        response = client.get(path)
-        assert response.status_code == 200, path
+def test_index_redirects_to_docs():
+    response = client.get("/", follow_redirects=False)
+    assert response.status_code in (302, 307)
+    assert response.headers["location"] == "/docs"
 
 
 @requires_data

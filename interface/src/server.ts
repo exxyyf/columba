@@ -6,14 +6,14 @@
  * Только локальный запуск, наружу ничего не ходит.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 
 import { readDicomPixels } from "./dicomPixels.js";
 import { UPLOAD_ROOT, ensureScan, getState, scanRoots } from "./manifest.js";
-import { ensureQuality } from "./quality.js";
+import { API_URL, ensureQuality } from "./quality.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(HERE, "..", "public");
@@ -81,6 +81,47 @@ app.post("/api/upload", express.raw({ type: () => true, limit: "128mb" }), (req,
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, name), body);
     res.json({ saved: path.relative(UPLOAD_ROOT, path.join(dir, name)) });
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
+/**
+ * Разбор одного снимка: прокси к `/visualize` API-сервиса columba.
+ * `?format=png` — кадр с оверлеем ориентиров, `?format=json` — регион,
+ * сторона и результаты чекеров структурировано. Файл уходит в сервис с
+ * диска, клиент повторно ничего не загружает.
+ */
+app.get("/api/visualize/:id", async (req, res) => {
+  try {
+    const manifest = await ensureScan();
+    const file = manifest.files.find((entry) => entry.id === req.params.id);
+    if (!file) {
+      res.status(404).json({ error: "неизвестный id снимка" });
+      return;
+    }
+    const fmt = req.query.format === "json" ? "json" : "png";
+    const form = new FormData();
+    const body = new Uint8Array(readFileSync(file.abs_path));
+    form.append("file", new Blob([body]), file.file_name);
+    const upstream = await fetch(`${API_URL}/visualize?format=${fmt}`, {
+      method: "POST",
+      body: form,
+    });
+    if (!upstream.ok) {
+      const text = await upstream.text().catch(() => upstream.statusText);
+      res
+        .status(502)
+        .json({ error: `сервис визуализации ответил ${upstream.status}: ${text.slice(0, 300)}` });
+      return;
+    }
+    if (fmt === "json") {
+      res.json(await upstream.json());
+      return;
+    }
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.end(Buffer.from(await upstream.arrayBuffer()));
   } catch (error) {
     res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
   }
