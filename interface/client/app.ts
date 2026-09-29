@@ -49,9 +49,26 @@ const METHOD_RU: Record<string, string> = {
   cnn_primary: "CNN",
 };
 
+interface QualityRow {
+  anatomical_region: string;
+  quality_class: number;
+  quality_prob: number;
+  violation_type: string;
+}
+
+interface QualityResponse {
+  state: "idle" | "running" | "ready" | "error";
+  done?: number;
+  total?: number;
+  message?: string;
+  results?: Record<string, QualityRow>;
+}
+
 let manifest: ViewerManifest | null = null;
 let activeFilter = "all";
 let searchQuery = "";
+let quality: QualityResponse = { state: "idle" };
+let qualityTimer: number | null = null;
 const pixelCache = new Map<string, ImageBitmap>();
 
 const grid = document.getElementById("grid") as HTMLElement;
@@ -78,6 +95,53 @@ async function loadManifest(force = false): Promise<void> {
   renderSummary();
   renderWarnings();
   renderGrid();
+  void pollQuality();
+}
+
+// ---------------------------------------------------------------------------
+// Контроль качества: опрос сервера, пока идёт расчёт по пайплайну
+// ---------------------------------------------------------------------------
+
+async function pollQuality(): Promise<void> {
+  if (qualityTimer !== null) {
+    window.clearTimeout(qualityTimer);
+    qualityTimer = null;
+  }
+  try {
+    const response = await fetch("/api/quality");
+    quality = response.ok ? ((await response.json()) as QualityResponse) : { state: "error" };
+  } catch {
+    quality = { state: "error", message: "сервис качества недоступен" };
+  }
+  renderSummary();
+  updateQualityBadges();
+  if (quality.state === "running") {
+    qualityTimer = window.setTimeout(() => void pollQuality(), 2500);
+  }
+}
+
+function qualityFor(id: string): QualityRow | null {
+  return quality.results?.[id] ?? null;
+}
+
+function qualityBadge(id: string): string {
+  const row = qualityFor(id);
+  if (!row) {
+    return quality.state === "running" || quality.state === "idle"
+      ? `<span class="badge badge-side" title="Контроль качества ещё выполняется">качество…</span>`
+      : "";
+  }
+  if (row.quality_class === 1) {
+    const types = row.violation_type || "нарушение";
+    return `<span class="badge badge-error" title="${escapeAttr(`Вероятность нарушения ${row.quality_prob.toFixed(2)}`)}">✕ ${escapeHtml(types)}</span>`;
+  }
+  return `<span class="badge badge-ok" title="${escapeAttr(`Вероятность нарушения ${row.quality_prob.toFixed(2)}`)}">✓ без нарушений</span>`;
+}
+
+function updateQualityBadges(): void {
+  document.querySelectorAll<HTMLElement>("[data-quality-for]").forEach((slot) => {
+    slot.innerHTML = qualityBadge(slot.dataset.qualityFor ?? "");
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +186,24 @@ function renderSummary(): void {
       failures
         ? `<div class="summary-item summary-item-error"><strong class="summary-value">${failures}</strong><span class="summary-label">Ошибки чтения</span></div>`
         : ""
-    }`;
+    }
+    ${qualitySummary()}`;
+}
+
+function qualitySummary(): string {
+  if (quality.state === "running") {
+    const done = quality.done ?? 0;
+    const total = quality.total ?? 0;
+    return `<div class="summary-item"><strong class="summary-value summary-value-text">${done} / ${total}</strong><span class="summary-label">Контроль качества…</span></div>`;
+  }
+  if (quality.state === "error") {
+    return `<div class="summary-item summary-item-error"><strong class="summary-value summary-value-text">недоступен</strong><span class="summary-label" title="${escapeAttr(quality.message ?? "")}">Контроль качества</span></div>`;
+  }
+  if (quality.state === "ready" && quality.results) {
+    const bad = Object.values(quality.results).filter((r) => r.quality_class === 1).length;
+    return `<div class="summary-item ${bad ? "summary-item-attention" : ""}"><strong class="summary-value">${bad}</strong><span class="summary-label">С нарушениями</span></div>`;
+  }
+  return "";
 }
 
 function renderWarnings(): void {
@@ -157,6 +238,8 @@ function passesFilter(file: ViewerFile): boolean {
       return file.region_final === "hip" && file.hip_side_final === "right";
     case "attention":
       return needsAttention(file);
+    case "violations":
+      return qualityFor(file.id)?.quality_class === 1;
     default:
       return true;
   }
@@ -201,7 +284,7 @@ function renderGrid(): void {
       <div class="card-info">
         <div class="card-title" title="${escapeAttr(file.file_name)}">${escapeHtml(file.file_name)}</div>
         <div class="card-path" title="${escapeAttr(file.relative_path)}">${escapeHtml(shortStudy(file))}</div>
-        <div class="badges">${badges(file)}</div>
+        <div class="badges">${badges(file)}<span data-quality-for="${escapeAttr(file.id)}">${qualityBadge(file.id)}</span></div>
       </div>`;
     card.addEventListener("click", () => openModal(file));
     grid.appendChild(card);
@@ -325,6 +408,17 @@ function openModal(file: ViewerFile): void {
   }
   if (file.dedup_group_size && file.dedup_group_size > 1) {
     rows.push(["Дубликаты", `${file.dedup_group_size} файла(ов) с одинаковыми пикселями`]);
+  }
+  const qualityRow = qualityFor(file.id);
+  if (qualityRow) {
+    rows.push([
+      "Контроль качества",
+      qualityRow.quality_class === 1 ? "нарушение обнаружено" : "без нарушений",
+    ]);
+    rows.push(["Вероятность нарушения", qualityRow.quality_prob.toFixed(3)]);
+    if (qualityRow.violation_type) rows.push(["Тип нарушения", qualityRow.violation_type]);
+  } else if (quality.state === "running") {
+    rows.push(["Контроль качества", "выполняется…"]);
   }
 
   modalMeta.innerHTML = `

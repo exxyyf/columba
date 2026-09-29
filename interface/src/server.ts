@@ -13,6 +13,7 @@ import express from "express";
 
 import { readDicomPixels } from "./dicomPixels.js";
 import { UPLOAD_ROOT, ensureScan, getState, scanRoots } from "./manifest.js";
+import { ensureQuality } from "./quality.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(HERE, "..", "public");
@@ -34,6 +35,20 @@ app.get("/api/manifest", async (req, res) => {
   try {
     const manifest = await ensureScan(req.query.force === "1");
     res.json(manifest);
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
+/**
+ * Результаты контроля качества (пайплайн columba через API-сервис):
+ * ленивый запуск при первом запросе после каждого скана, дальше — прогресс
+ * и накопленные результаты. Клиент опрашивает, пока state === "running".
+ */
+app.get("/api/quality", async (_req, res) => {
+  try {
+    const manifest = await ensureScan();
+    res.json(ensureQuality(manifest));
   } catch (error) {
     res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
   }
